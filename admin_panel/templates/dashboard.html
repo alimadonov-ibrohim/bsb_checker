@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<h1 class="page-title">📊 Dashboard</h1>
+<div class="cards" id="cards">
+  <div class="card"><div class="label">Jami foydalanuvchilar</div><div class="value" id="total_users">—</div></div>
+  <div class="card"><div class="label">Bugungi yangi</div><div class="value" id="new_today">—</div></div>
+  <div class="card"><div class="label">Premium</div><div class="value" id="premium_users">—</div></div>
+  <div class="card"><div class="label">Bugungi PDFlar</div><div class="value" id="pdfs_today">—</div></div>
+  <div class="card"><div class="label">Bugungi tekshiruvlar</div><div class="value" id="checks_today">—</div></div>
+  <div class="card"><div class="label">To‘lovlar (so‘m)</div><div class="value" id="total_payments">—</div></div>
+  <div class="card"><div class="label">Jami testlar</div><div class="value" id="total_tests">—</div></div>
+  <div class="card"><div class="label">Muvaffaqiyatsiz joblar</div><div class="value" id="failed_jobs">—</div></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function loadStats() {
+  const res = await api("/api/dashboard/stats");
+  if (!res) return;
+  const d = await res.json();
+  document.getElementById("total_users").textContent = d.total_users;
+  document.getElementById("new_today").textContent = d.new_today;
+  document.getElementById("premium_users").textContent = d.premium_users;
+  document.getElementById("pdfs_today").textContent = d.pdfs_today;
+  document.getElementById("checks_today").textContent = d.checks_today;
+  document.getElementById("total_payments").textContent = Number(d.total_payments).toLocaleString();
+  document.getElementById("total_tests").textContent = d.total_tests;
+  document.getElementById("failed_jobs").textContent = d.failed_jobs;
+}
+loadStats();
+</script>
+{% endblock %}

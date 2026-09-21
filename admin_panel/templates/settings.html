@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+<h1 class="page-title">⚙️ Sozlamalar</h1>
+<div class="settings-form" id="form"></div>
+{% endblock %}
+{% block scripts %}
+<script>
+const labels = {
+  free_daily_pdf_limit: "Oddiy kunlik PDF limit",
+  premium_daily_pdf_limit: "Premium kunlik PDF limit",
+  premium_price_uzs: "Premium narxi (so‘m)",
+  premium_duration_days: "Premium muddati (kun)",
+  gemini_model: "Gemini model",
+  max_file_size_mb: "Maksimal fayl hajmi (MB)",
+};
+async function load() {
+  const res = await api("/api/settings");
+  if (!res) return;
+  const items = await res.json();
+  const form = document.getElementById("form");
+  form.innerHTML = items.map(s => `
+    <div class="form-group">
+      <label>${labels[s.key] || s.key}</label>
+      <input type="text" id="s_${s.key}" value="${s.value}">
+      <button class="btn btn-primary btn-sm" onclick="save('${s.key}')">Saqlash</button>
+    </div>
+  `).join("");
+}
+async function save(key) {
+  const value = document.getElementById("s_" + key).value;
+  const res = await api("/api/settings/" + key, {
+    method: "PUT",
+    body: JSON.stringify({value}),
+  });
+  if (res && res.ok) alert("Saqlandi");
+  else alert("Xatolik");
+}
+load();
+</script>
+{% endblock %}

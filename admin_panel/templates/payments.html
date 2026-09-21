@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Payments{% endblock %}
+{% block content %}
+<h1 class="page-title">💰 To‘lovlar</h1>
+<div class="search-bar">
+  <select id="status">
+    <option value="">Barchasi</option>
+    <option value="paid">Paid</option>
+    <option value="pending">Pending</option>
+    <option value="failed">Failed</option>
+    <option value="cancelled">Cancelled</option>
+  </select>
+  <button class="btn btn-primary" onclick="load()">Filter</button>
+</div>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th><th>Telegram ID</th><th>Username</th><th>Summa</th>
+        <th>Status</th><th>Provider</th><th>TX</th><th>Sana</th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function load() {
+  const status = document.getElementById("status").value;
+  const res = await api("/api/payments?per_page=50" + (status ? "&status=" + status : ""));
+  if (!res) return;
+  const data = await res.json();
+  document.getElementById("tbody").innerHTML = data.items.map(p => `
+    <tr>
+      <td>${p.id}</td>
+      <td><code>${p.telegram_id || "—"}</code></td>
+      <td>${p.username ? "@" + p.username : "—"}</td>
+      <td>${Number(p.amount).toLocaleString()} so‘m</td>
+      <td><span class="badge badge-${p.status}">${p.status}</span></td>
+      <td>${p.provider || "—"}</td>
+      <td><code>${p.transaction_id || "—"}</code></td>
+      <td>${formatDate(p.created_at)}</td>
+    </tr>
+  `).join("") || "<tr><td colspan='8'>Bo‘sh</td></tr>";
+}
+load();
+</script>
+{% endblock %}

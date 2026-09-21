@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Admin{% endblock %} — BSB Checker</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <h1>📋 BSB Checker</h1>
+      <nav>
+        <a href="/admin" class="{% if request.url.path == '/admin' or request.url.path == '/admin/' %}active{% endif %}">📊 Dashboard</a>
+        <a href="/admin/users" class="{% if '/users' in request.url.path %}active{% endif %}">👥 Users</a>
+        <a href="/admin/tests" class="{% if '/tests' in request.url.path %}active{% endif %}">📝 Tests</a>
+        <a href="/admin/payments" class="{% if '/payments' in request.url.path %}active{% endif %}">💰 Payments</a>
+        <a href="/admin/processing" class="{% if '/processing' in request.url.path %}active{% endif %}">⚙️ Processing</a>
+        <a href="/admin/settings" class="{% if '/settings' in request.url.path %}active{% endif %}">⚙️ Settings</a>
+        <a href="/admin/logout">🚪 Chiqish</a>
+      </nav>
+    </aside>
+    <main class="main">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+  <script src="/static/js/app.js"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

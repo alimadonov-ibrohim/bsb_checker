@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Tests{% endblock %}
+{% block content %}
+<h1 class="page-title">📝 Testlar</h1>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th><th>Fan</th><th>Sinf</th><th>Nomi</th><th>Turi</th>
+        <th>Savollar</th><th>O‘quvchilar</th><th>O‘qituvchi</th><th>Sana</th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function load() {
+  const res = await api("/api/tests?per_page=50");
+  if (!res) return;
+  const data = await res.json();
+  document.getElementById("tbody").innerHTML = data.items.map(t => `
+    <tr>
+      <td>${t.id}</td>
+      <td>${t.subject}</td>
+      <td>${t.class_name}</td>
+      <td>${t.test_name}</td>
+      <td>${t.test_type}</td>
+      <td>${t.question_count}</td>
+      <td>${t.students}</td>
+      <td>${t.teacher || "—"} (${t.teacher_telegram_id || ""})</td>
+      <td>${formatDate(t.created_at)}</td>
+    </tr>
+  `).join("") || "<tr><td colspan='9'>Bo‘sh</td></tr>";
+}
+load();
+</script>
+{% endblock %}

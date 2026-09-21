@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Processing{% endblock %}
+{% block content %}
+<h1 class="page-title">⚙️ Processing Jobs</h1>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Job ID</th><th>User</th><th>Test</th><th>Fayl</th>
+        <th>Progress</th><th>Status</th><th>Xato</th><th>Sana</th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function load() {
+  const res = await api("/api/processing?per_page=50");
+  if (!res) return;
+  const data = await res.json();
+  document.getElementById("tbody").innerHTML = data.items.map(j => `
+    <tr>
+      <td>${j.id}</td>
+      <td><code>${j.user_telegram_id || "—"}</code></td>
+      <td>${j.test_id}</td>
+      <td>${j.file_name}</td>
+      <td>${j.processed_pages} / ${j.total_pages}</td>
+      <td><span class="badge badge-${j.status}">${j.status}</span></td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis">${j.error || "—"}</td>
+      <td>${formatDate(j.created_at)}</td>
+    </tr>
+  `).join("") || "<tr><td colspan='8'>Bo‘sh</td></tr>";
+}
+load();
+setInterval(load, 10000);
+</script>
+{% endblock %}

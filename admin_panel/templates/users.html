@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Users{% endblock %}
+{% block content %}
+<h1 class="page-title">👥 Foydalanuvchilar</h1>
+<div class="search-bar">
+  <input type="text" id="search" placeholder="Telegram ID, username, ism...">
+  <button class="btn btn-primary" onclick="loadUsers()">Qidirish</button>
+</div>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th><th>Telegram ID</th><th>Username</th><th>Ism</th>
+        <th>Plan</th><th>Premium tugashi</th><th>PDF</th><th>Sana</th><th>Status</th><th>Amallar</th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function loadUsers() {
+  const q = document.getElementById("search").value.trim();
+  const res = await api("/api/users?per_page=50" + (q ? "&q=" + encodeURIComponent(q) : ""));
+  if (!res) return;
+  const data = await res.json();
+  const tbody = document.getElementById("tbody");
+  tbody.innerHTML = data.items.map(u => `
+    <tr>
+      <td>${u.id}</td>
+      <td><code>${u.telegram_id}</code></td>
+      <td>${u.username ? "@" + u.username : "—"}</td>
+      <td>${u.first_name || "—"}</td>
+      <td><span class="badge badge-${u.plan === "premium" ? "premium" : "free"}">${u.plan}</span></td>
+      <td>${formatDate(u.premium_until)}</td>
+      <td>${u.daily_pdf_used}</td>
+      <td>${formatDate(u.created_at)}</td>
+      <td>${u.is_blocked ? '<span class="badge badge-blocked">Bloklangan</span>' : "Faol"}</td>
+      <td class="btn-group">
+        <button class="btn btn-sm btn-success" onclick="act(${u.id},'premium')">👑 Premium</button>
+        <button class="btn btn-sm btn-warning" onclick="act(${u.id},'remove-premium')">Premium olib tashlash</button>
+        ${u.is_blocked
+          ? `<button class="btn btn-sm btn-primary" onclick="act(${u.id},'unblock')">Unblock</button>`
+          : `<button class="btn btn-sm btn-danger" onclick="act(${u.id},'block')">Bloklash</button>`}
+      </td>
+    </tr>
+  `).join("") || "<tr><td colspan='10'>Bo‘sh</td></tr>";
+}
+async function act(id, action) {
+  if (!confirm("Tasdiqlaysizmi?")) return;
+  const res = await api(`/api/users/${id}/${action}`, {method: "POST"});
+  if (res && res.ok) loadUsers();
+  else alert("Xatolik");
+}
+document.getElementById("search").addEventListener("keydown", e => { if (e.key === "Enter") loadUsers(); });
+loadUsers();
+</script>
+{% endblock %}

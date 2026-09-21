@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Login — BSB Checker</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <div class="login-wrap">
+    <div class="login-box">
+      <h1>🔐 Admin Login</h1>
+      <div id="error" class="error" style="display:none"></div>
+      <div class="form-group">
+        <label>Username</label>
+        <input type="text" id="username" autocomplete="username">
+      </div>
+      <div class="form-group">
+        <label>Password</label>
+        <input type="password" id="password" autocomplete="current-password">
+      </div>
+      <button class="btn btn-primary" onclick="doLogin()">Kirish</button>
+    </div>
+  </div>
+  <script src="/static/js/app.js"></script>
+  <script>
+    async function doLogin() {
+      const username = document.getElementById("username").value.trim();
+      const password = document.getElementById("password").value;
+      const err = document.getElementById("error");
+      err.style.display = "none";
+      try {
+        const res = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({username, password}),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          err.textContent = data.detail || "Xatolik";
+          err.style.display = "block";
+          return;
+        }
+        setCookie("admin_token", data.access_token, 1);
+        window.location.href = "/admin";
+      } catch (e) {
+        err.textContent = "Server bilan bog‘lanib bo‘lmadi";
+        err.style.display = "block";
+      }
+    }
+    document.getElementById("password").addEventListener("keydown", e => {
+      if (e.key === "Enter") doLogin();
+    });
+  </script>
+</body>
+</html>
