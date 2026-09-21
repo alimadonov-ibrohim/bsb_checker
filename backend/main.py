@@ -82,7 +82,7 @@ async def lifespan(app: FastAPI):
                 "premium_daily_pdf_limit": os.getenv("PREMIUM_DAILY_PDF_LIMIT", "6"),
                 "premium_price_uzs": os.getenv("PREMIUM_PRICE_UZS", "35000"),
                 "premium_duration_days": os.getenv("PREMIUM_DURATION_DAYS", "30"),
-                "gemini_model": os.getenv("GEMINI_MODEL", "gemini-1.5-flash"),
+                "gemini_model": os.getenv("GEMINI_MODEL", "gemini-3.6-flash"),
                 "max_file_size_mb": os.getenv("MAX_FILE_SIZE_MB", "50"),
             }
             for key, value in defaults.items():

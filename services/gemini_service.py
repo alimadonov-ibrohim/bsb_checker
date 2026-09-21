@@ -9,14 +9,15 @@ import logging
 from typing import Optional
 from pathlib import Path
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from dotenv import load_dotenv
 
 load_dotenv()
 logger = logging.getLogger(__name__)
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
 
 # Strict extraction prompt — NO solving, NO guessing
 EXTRACT_ANSWER_KEY_PROMPT = """
@@ -96,38 +97,36 @@ class GeminiService:
     def __init__(self):
         if not GEMINI_API_KEY:
             raise ValueError("GEMINI_API_KEY is not set in environment")
-        genai.configure(api_key=GEMINI_API_KEY)
-        self.model = genai.GenerativeModel(GEMINI_MODEL)
+        self.client = genai.Client(api_key=GEMINI_API_KEY)
+        self.model = GEMINI_MODEL
         self.max_retries = 3
         self.retry_delay = 2.0
 
     async def _upload_file(self, file_path: str):
-        """Upload file to Gemini Files API (async wrapper)."""
+        """Upload file to Gemini Files API."""
         path = Path(file_path)
         if not path.exists():
             raise FileNotFoundError(f"File not found: {file_path}")
-
-        def _upload():
-            return genai.upload_file(path=str(path))
-
-        return await asyncio.to_thread(_upload)
+        return await self.client.aio.files.upload(file=str(path))
 
     async def _generate_with_retry(self, contents, prompt: str) -> str:
         last_error = None
+        payload = [prompt] + (contents if isinstance(contents, list) else [contents])
+        config = types.GenerateContentConfig(
+            temperature=0.0,
+            response_mime_type="application/json",
+            automatic_function_calling=types.AutomaticFunctionCallingConfig(
+                disable=True
+            ),
+        )
         for attempt in range(1, self.max_retries + 1):
             try:
-                def _call():
-                    response = self.model.generate_content(
-                        [prompt] + (contents if isinstance(contents, list) else [contents]),
-                        generation_config={
-                            "temperature": 0.0,
-                            "response_mime_type": "application/json",
-                        },
-                    )
-                    return response.text
-
-                text = await asyncio.to_thread(_call)
-                return text.strip()
+                response = await self.client.aio.models.generate_content(
+                    model=self.model,
+                    contents=payload,
+                    config=config,
+                )
+                return response.text.strip()
             except Exception as e:
                 last_error = e
                 logger.warning(f"Gemini attempt {attempt}/{self.max_retries} failed: {e}")
