@@ -3,10 +3,10 @@ Gemini Service — ONLY extracts answers from files.
 NEVER solves tests. NEVER uses knowledge. NEVER guesses.
 """
 import os
+import re
 import json
 import asyncio
 import logging
-from typing import Optional
 from pathlib import Path
 
 from google import genai
@@ -18,60 +18,76 @@ logger = logging.getLogger(__name__)
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
+GEMINI_FALLBACK_MODELS = [
+    m.strip()
+    for m in os.getenv(
+        "GEMINI_FALLBACK_MODELS",
+        "gemini-3.5-flash,gemini-3.5-flash-lite,gemini-3.7-flash,gemini-3.8-flash,"
+        "gemini-flash-lite-latest,gemini-omni-flash-preview",
+    ).split(",")
+    if m.strip()
+]
 
-# Strict extraction prompt — NO solving, NO guessing
+# Permissive extraction prompt — reads ANY layout, but NEVER solves/guesses.
 EXTRACT_ANSWER_KEY_PROMPT = """
 You are a pure OCR/extraction tool. Your ONLY job is to read the answers that are already written in the provided file(s).
+
+The answer key may be written in ANY format, for example:
+- "1-A, 2-C, 3-B"
+- "1. A   2. C   3. B"
+- "1) A   2) C"
+- "1 A   2 C"
+- a table with question numbers and answer letters
+- a vertical list, one answer per line
+- a continuous sequence of letters, e.g. "ABCDABCD" (first letter = question 1, second = question 2, ...)
+- letters circled/underlined in a row
 
 RULES (STRICT):
 1. Extract ONLY the answers that are explicitly written or marked in the file.
 2. Do NOT solve any question.
 3. Do NOT use your own knowledge.
-4. Do NOT guess or invent any answer.
-5. If an answer is unclear or not present → put null for that question.
-6. Output MUST be valid JSON only. No markdown, no explanation.
+4. Do NOT guess or invent an answer for a question that has no answer.
+5. If an answer is unreadable or missing, use null for that number — but still include the number.
+6. If the file contains a continuous sequence of letters without numbers, number them from 1 in order.
+7. Output MUST be valid JSON only. No markdown, no explanation.
 
-Expected format of answers in file (examples):
-1-A
-2. C
-3) B
-4 - D
-5: A
-
-Return JSON exactly like this:
+Return JSON mapping question number -> answer letter:
 {
   "1": "A",
   "2": "C",
   "3": "B",
-  "4": "D",
-  "5": "A"
+  "4": "D"
 }
 
-If a question number has no clear answer mark:
-{
-  "5": null
-}
-
-If you are uncertain about a specific answer:
-{
-  "5": null,
-  "status": "uncertain"
-}
-
-Only include question numbers that appear in the file.
 Return pure JSON, nothing else.
+"""
+
+# Fallback used only if the first attempt returns nothing.
+EXTRACT_ANSWER_KEY_FALLBACK_PROMPT = """
+Read the provided file and list every answer letter that is written on it, in order.
+Do NOT solve the questions. Do NOT guess. Only transcribe what is visible.
+
+Return JSON where keys are question numbers and values are the letters found:
+{"1": "A", "2": "C", "3": "B"}
+
+If numbers are not shown, use positions 1, 2, 3, ... in reading order.
+If something is unreadable use null.
+Return pure JSON only.
 """
 
 EXTRACT_STUDENT_ANSWERS_PROMPT = """
 You are a pure OCR/extraction tool. Your ONLY job is to read the answers that the student has marked or written on the provided page/image.
+
+The marks may be in ANY format: a letter next to the number (1-A, 1.A, 1)A, 1 A),
+a circled/underlined/checked option, a table, or a row of letters.
 
 RULES (STRICT):
 1. Extract ONLY the answers that the student has explicitly marked/circled/written.
 2. Do NOT solve any question yourself.
 3. Do NOT use your knowledge of the subject.
 4. Do NOT guess what the student might have meant.
-5. If a question has no mark → null.
-6. If the mark is unreadable → null and optionally "status": "uncertain".
+5. If a question has no mark -> null.
+6. If the mark is unreadable -> null and optionally "status": "uncertain".
 7. Also try to extract student name, surname, class if visible (fields like "Ism:", "Familiya:", "Sinf:").
 
 Return pure JSON only:
@@ -87,8 +103,6 @@ Return pure JSON only:
 }
 
 If name cannot be found, set "name": null.
-If any answer is uncertain, you may put "status": "uncertain" inside that answer value object, but prefer simple null.
-
 Return ONLY valid JSON. No markdown fences.
 """
 
@@ -99,6 +113,9 @@ class GeminiService:
             raise ValueError("GEMINI_API_KEY is not set in environment")
         self.client = genai.Client(api_key=GEMINI_API_KEY)
         self.model = GEMINI_MODEL
+        self.models = [GEMINI_MODEL] + [
+            m for m in GEMINI_FALLBACK_MODELS if m != GEMINI_MODEL
+        ]
         self.max_retries = 3
         self.retry_delay = 2.0
 
@@ -110,7 +127,7 @@ class GeminiService:
         return await self.client.aio.files.upload(file=str(path))
 
     async def _generate_with_retry(self, contents, prompt: str) -> str:
-        last_error = None
+        """Generate content, retrying and rotating through models on failure."""
         payload = [prompt] + (contents if isinstance(contents, list) else [contents])
         config = types.GenerateContentConfig(
             temperature=0.0,
@@ -119,23 +136,32 @@ class GeminiService:
                 disable=True
             ),
         )
-        for attempt in range(1, self.max_retries + 1):
-            try:
-                response = await self.client.aio.models.generate_content(
-                    model=self.model,
-                    contents=payload,
-                    config=config,
-                )
-                return response.text.strip()
-            except Exception as e:
-                last_error = e
-                logger.warning(f"Gemini attempt {attempt}/{self.max_retries} failed: {e}")
-                if attempt < self.max_retries:
-                    await asyncio.sleep(self.retry_delay * attempt)
-        raise RuntimeError(f"Gemini failed after {self.max_retries} retries: {last_error}")
+        errors = []
+        for model in self.models:
+            for attempt in range(1, self.max_retries + 1):
+                try:
+                    response = await self.client.aio.models.generate_content(
+                        model=model,
+                        contents=payload,
+                        config=config,
+                    )
+                    return (response.text or "").strip()
+                except Exception as e:
+                    msg = str(e)
+                    errors.append(f"{model}: {msg[:160]}")
+                    logger.warning(
+                        f"Gemini model={model} attempt {attempt}/{self.max_retries} "
+                        f"failed: {msg[:200]}"
+                    )
+                    # Quota / model-not-found / bad-request -> switch model immediately
+                    if any(code in msg for code in ("429", "RESOURCE_EXHAUSTED", "404", "NOT_FOUND", "400")):
+                        break
+                    if attempt < self.max_retries:
+                        await asyncio.sleep(self.retry_delay * attempt)
+        raise RuntimeError("Gemini failed on all models: " + " | ".join(errors[-3:]))
 
     def _parse_json(self, text: str) -> dict:
-        text = text.strip()
+        text = (text or "").strip()
         # Remove possible markdown fences
         if text.startswith("```"):
             lines = text.split("\n")
@@ -143,39 +169,74 @@ class GeminiService:
             text = "\n".join(lines).strip()
         try:
             return json.loads(text)
-        except json.JSONDecodeError as e:
+        except json.JSONDecodeError:
+            # Try to recover the first JSON object in the text
+            match = re.search(r"\{.*\}", text, re.DOTALL)
+            if match:
+                try:
+                    return json.loads(match.group(0))
+                except json.JSONDecodeError:
+                    pass
             logger.error(f"Failed to parse Gemini JSON: {text[:500]}")
-            raise ValueError(f"Invalid JSON from Gemini: {e}")
+            return {}
+
+    def _normalize_answer_map(self, data) -> dict:
+        """Turn any parsed structure into {question_number: letter|null}."""
+        if isinstance(data, dict) and isinstance(data.get("answers"), dict):
+            data = data["answers"]
+        result = {}
+        if not isinstance(data, dict):
+            return result
+        for k, v in data.items():
+            if k in ("status", "name", "class_name", "answers"):
+                continue
+            key = str(k).strip()
+            if not key.isdigit():
+                digits = "".join(ch for ch in key if ch.isdigit())
+                if not digits:
+                    continue
+                key = digits
+            if v is None:
+                result[key] = None
+            elif isinstance(v, dict):
+                inner = v.get("answer") or v.get("value") or v.get("letter")
+                result[key] = self._clean_letter(inner)
+            elif isinstance(v, (list, tuple)):
+                result[key] = self._clean_letter(v[0]) if v else None
+            else:
+                result[key] = self._clean_letter(v)
+        return result
+
+    @staticmethod
+    def _clean_letter(value) -> str | None:
+        if value is None:
+            return None
+        text = str(value).strip().upper()
+        if not text:
+            return None
+        letters = [c for c in text if "A" <= c <= "Z"]
+        return letters[0] if letters else None
+
+    async def _extract_with_prompts(self, contents, primary: str, fallback: str) -> dict:
+        raw = await self._generate_with_retry(contents, primary)
+        result = self._normalize_answer_map(self._parse_json(raw))
+        if not result:
+            logger.warning(f"Answer key empty on first pass, retrying. raw={raw[:300]!r}")
+            raw = await self._generate_with_retry(contents, fallback)
+            result = self._normalize_answer_map(self._parse_json(raw))
+            if not result:
+                logger.error(f"Answer key still empty. raw={raw[:300]!r}")
+        return result
 
     async def extract_answer_key(self, file_paths: list[str]) -> dict:
         """
         Extract answer key from TXT / PDF / images.
         Returns: {"1": "A", "2": "C", ...} or with nulls.
         """
-        uploaded = []
-        try:
-            for fp in file_paths:
-                uploaded.append(await self._upload_file(fp))
-
-            raw = await self._generate_with_retry(uploaded, EXTRACT_ANSWER_KEY_PROMPT)
-            data = self._parse_json(raw)
-
-            # Normalize: only keep string answers or null
-            result = {}
-            for k, v in data.items():
-                if k == "status":
-                    continue
-                key = str(k)
-                if v is None or (isinstance(v, dict) and v.get("status") == "uncertain"):
-                    result[key] = None
-                elif isinstance(v, str):
-                    result[key] = v.strip().upper()
-                else:
-                    result[key] = None
-            return result
-        finally:
-            # Cleanup uploaded files on Gemini side is optional; local files cleaned by caller
-            pass
+        uploaded = [await self._upload_file(fp) for fp in file_paths]
+        return await self._extract_with_prompts(
+            uploaded, EXTRACT_ANSWER_KEY_PROMPT, EXTRACT_ANSWER_KEY_FALLBACK_PROMPT
+        )
 
     async def extract_student_answers(self, file_path: str) -> dict:
         """
@@ -191,44 +252,16 @@ class GeminiService:
         raw = await self._generate_with_retry([uploaded], EXTRACT_STUDENT_ANSWERS_PROMPT)
         data = self._parse_json(raw)
 
-        answers_raw = data.get("answers", data)  # fallback if model returns flat
-        if not isinstance(answers_raw, dict):
-            answers_raw = {}
-
-        answers = {}
-        for k, v in answers_raw.items():
-            if k in ("name", "class_name", "status"):
-                continue
-            key = str(k)
-            if v is None:
-                answers[key] = None
-            elif isinstance(v, dict):
-                answers[key] = None  # uncertain
-            elif isinstance(v, str):
-                answers[key] = v.strip().upper()
-            else:
-                answers[key] = None
+        answers = self._normalize_answer_map(data)
 
         return {
-            "name": data.get("name") if data.get("name") else None,
-            "class_name": data.get("class_name") if data.get("class_name") else None,
+            "name": data.get("name") if isinstance(data, dict) and data.get("name") else None,
+            "class_name": data.get("class_name") if isinstance(data, dict) and data.get("class_name") else None,
             "answers": answers,
         }
 
     async def extract_from_text(self, text_content: str) -> dict:
         """For plain TXT answer keys."""
         prompt = EXTRACT_ANSWER_KEY_PROMPT + f"\n\nText content:\n{text_content}"
-        raw = await self._generate_with_retry([], prompt)
-        data = self._parse_json(raw)
-        result = {}
-        for k, v in data.items():
-            if k == "status":
-                continue
-            key = str(k)
-            if v is None:
-                result[key] = None
-            elif isinstance(v, str):
-                result[key] = v.strip().upper()
-            else:
-                result[key] = None
-        return result
+        fallback = EXTRACT_ANSWER_KEY_FALLBACK_PROMPT + f"\n\nText content:\n{text_content}"
+        return await self._extract_with_prompts([], prompt, fallback)

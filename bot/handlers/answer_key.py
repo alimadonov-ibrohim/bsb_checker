@@ -153,7 +153,7 @@ async def receive_answer_key(
         else:
             answers = await gemini.extract_answer_key(file_paths)
 
-        if not answers:
+        if not answers or not any(v for v in answers.values()):
             await message.answer(
                 "⚠️ Javoblar kalitidan hech narsa o‘qib bo‘lmadi.\n"
                 "Formatni tekshiring: 1-A, 2-C, 3-B ...",
