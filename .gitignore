@@ -49,3 +49,6 @@ uploads/*
 secrets/
 *.pem
 *.key
+
+.vercel
+.env*

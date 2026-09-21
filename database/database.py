@@ -5,9 +5,28 @@ import os
 
 load_dotenv()
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql+asyncpg://postgres:password@localhost:5432/bsb_checker"
+
+def _clean_db_url(url: str) -> str:
+    url = url.strip().strip('"').strip("'")
+    if "?" in url:
+        base, _, query = url.partition("?")
+        params = []
+        for part in query.split("&"):
+            part = part.strip()
+            if "=" in part:
+                key, _, value = part.partition("=")
+                params.append(f"{key.strip()}={value.strip()}")
+            elif part:
+                params.append(part)
+        url = base + "?" + "&".join(params)
+    return url
+
+
+DATABASE_URL = _clean_db_url(
+    os.getenv(
+        "DATABASE_URL",
+        "postgresql+asyncpg://postgres:password@localhost:5432/bsb_checker",
+    )
 )
 
 engine = create_async_engine(
