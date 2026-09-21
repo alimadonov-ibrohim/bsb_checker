@@ -8,10 +8,12 @@ from pathlib import Path
 from typing import List, Dict, Any
 import os
 
+from services.paths import uploads_dir as default_uploads_dir
+
 
 class ExcelService:
-    def __init__(self, output_dir: str = "uploads"):
-        self.output_dir = Path(output_dir)
+    def __init__(self, output_dir: str | None = None):
+        self.output_dir = Path(output_dir) if output_dir else default_uploads_dir()
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
     def generate_results_excel(

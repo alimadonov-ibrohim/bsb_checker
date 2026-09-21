@@ -17,10 +17,11 @@ from bot.keyboards.main_kb import main_menu_kb, cancel_kb
 from services.gemini_service import GeminiService
 from services.pdf_service import PDFService
 from services.checker_service import CheckerService
+from services.paths import temp_dir
 
 router = Router(name="student_answers")
 
-TEMP = Path(os.getenv("TEMP_DIR", "temp"))
+TEMP = temp_dir()
 MAX_FILE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "50"))
 
 

@@ -9,12 +9,14 @@ from typing import List, Tuple
 from PIL import Image
 import io
 
+from services.paths import temp_dir as default_temp_dir
+
 logger = logging.getLogger(__name__)
 
 
 class PDFService:
-    def __init__(self, temp_dir: str = "temp"):
-        self.temp_dir = Path(temp_dir)
+    def __init__(self, temp_dir: str | None = None):
+        self.temp_dir = Path(temp_dir) if temp_dir else default_temp_dir()
         self.temp_dir.mkdir(parents=True, exist_ok=True)
 
     def get_page_count(self, pdf_path: str) -> int:

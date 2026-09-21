@@ -11,11 +11,12 @@ from sqlalchemy import select
 from database.models import User, Test, AnswerKey
 from bot.keyboards.main_kb import main_menu_kb, cancel_kb
 from services.gemini_service import GeminiService
+from services.paths import temp_dir
 
 router = Router(name="answer_key")
 
 ALLOWED_EXT = {".txt", ".pdf", ".jpg", ".jpeg", ".png"}
-TEMP = Path(os.getenv("TEMP_DIR", "temp"))
+TEMP = temp_dir()
 
 
 class AnswerKeyFSM(StatesGroup):
