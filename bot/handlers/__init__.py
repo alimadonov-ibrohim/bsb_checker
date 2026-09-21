@@ -7,6 +7,7 @@ from .results import router as results_router
 from .premium import router as premium_router
 from .profile import router as profile_router
 from .help import router as help_router
+from .admin import router as admin_router
 
 
 def get_all_routers() -> list[Router]:
@@ -19,4 +20,5 @@ def get_all_routers() -> list[Router]:
         premium_router,
         profile_router,
         help_router,
+        admin_router,
     ]
