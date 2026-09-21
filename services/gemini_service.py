@@ -106,6 +106,20 @@ If name cannot be found, set "name": null.
 Return ONLY valid JSON. No markdown fences.
 """
 
+EXTRACT_STUDENT_ANSWERS_BATCH_PROMPT = (
+    EXTRACT_STUDENT_ANSWERS_PROMPT
+    + """
+
+The user provided MULTIPLE page images. Process EACH image independently.
+- Return a JSON array with EXACTLY one element per image, in the SAME order as the images.
+- Element i corresponds to image i:
+  {"name": "... or null", "class_name": "... or null", "answers": {"1": "A", ...}}
+- Do NOT merge pages and do NOT skip elements. If a page is blank, return
+  {"name": null, "class_name": null, "answers": {}} for it.
+Return ONLY the JSON array. No markdown, no extra text.
+"""
+)
+
 
 class GeminiService:
     def __init__(self):
@@ -265,3 +279,50 @@ class GeminiService:
         prompt = EXTRACT_ANSWER_KEY_PROMPT + f"\n\nText content:\n{text_content}"
         fallback = EXTRACT_ANSWER_KEY_FALLBACK_PROMPT + f"\n\nText content:\n{text_content}"
         return await self._extract_with_prompts([], prompt, fallback)
+
+    async def extract_student_answers_batch(self, file_paths: list[str]) -> list[dict]:
+        """
+        Read multiple pages in ONE Gemini request.
+        Returns a list aligned with file_paths:
+        [
+          {"name": ..., "class_name": ..., "answers": {...}},
+          ...
+        ]
+        """
+        uploaded = [await self._upload_file(fp) for fp in file_paths]
+        raw = await self._generate_with_retry(
+            uploaded, EXTRACT_STUDENT_ANSWERS_BATCH_PROMPT
+        )
+        data = self._parse_json(raw)
+
+        items = None
+        if isinstance(data, list):
+            items = data
+        elif isinstance(data, dict):
+            for k in ("students", "pages", "results", "answers"):
+                if isinstance(data.get(k), list):
+                    items = data[k]
+                    break
+
+        if not isinstance(items, list):
+            raise ValueError(
+                f"Batch response is not a list; raw={raw[:300]!r}"
+            )
+
+        out = []
+        for it in items[: len(file_paths)]:
+            if isinstance(it, dict):
+                out.append(
+                    {
+                        "name": it.get("name") or None,
+                        "class_name": it.get("class_name") or None,
+                        "answers": self._normalize_answer_map(it),
+                    }
+                )
+            else:
+                out.append({"name": None, "class_name": None, "answers": {}})
+
+        while len(out) < len(file_paths):
+            out.append({"name": None, "class_name": None, "answers": {}})
+
+        return out

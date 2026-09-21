@@ -69,8 +69,14 @@ async def lifespan(app: FastAPI):
         async with async_session_maker() as session:
             admin_user = os.getenv("ADMIN_USERNAME", "admin")
             admin_pass = os.getenv("ADMIN_PASSWORD", "admin123")
-            r = await session.execute(select(Admin).where(Admin.username == admin_user))
-            if not r.scalar_one_or_none():
+            admin = await session.scalar(
+                select(Admin).where(Admin.username == admin_user)
+            )
+            if admin is not None:
+                # Keep env credentials authoritative
+                admin.password_hash = pwd_context.hash(admin_pass)
+                admin.is_active = True
+            else:
                 admin = Admin(
                     username=admin_user,
                     password_hash=pwd_context.hash(admin_pass),

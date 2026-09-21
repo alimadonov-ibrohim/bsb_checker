@@ -1,6 +1,7 @@
 import os
 import json
 import asyncio
+import logging
 from pathlib import Path
 from datetime import datetime, timezone
 from aiogram import Router, F, Bot
@@ -21,8 +22,12 @@ from services.paths import temp_dir
 
 router = Router(name="student_answers")
 
+logger = logging.getLogger(__name__)
+
 TEMP = temp_dir()
 MAX_FILE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "50"))
+STUDENT_BATCH_SIZE = int(os.getenv("STUDENT_BATCH_SIZE", "4"))
+STUDENT_CONCURRENCY = int(os.getenv("STUDENT_CONCURRENCY", "2"))
 
 
 class StudentAnswersFSM(StatesGroup):
@@ -267,36 +272,62 @@ async def process_student_file(
             job.total_pages = 1
             await session.flush()
 
-        page_results = []
-        total = len(image_paths)
+        page_results = [None] * total
+        sem = asyncio.Semaphore(STUDENT_CONCURRENCY)
+        lock = asyncio.Lock()
+        done = [0]
 
-        for i, img_path in enumerate(image_paths):
-            try:
-                extracted = await gemini.extract_student_answers(img_path)
-                page_results.append(extracted)
-            except Exception as e:
-                page_results.append({"name": None, "class_name": None, "answers": {}})
-                # continue
+        def progress_bar(count):
+            bar_len = 20
+            filled = int(bar_len * count / total)
+            return "█" * filled + "░" * (bar_len - filled)
 
-            job.processed_pages = i + 1
-            await session.flush()
+        def empty_result():
+            return {"name": None, "class_name": None, "answers": {}}
 
-            if (i + 1) % 5 == 0 or (i + 1) == total:
-                bar_len = 20
-                filled = int(bar_len * (i + 1) / total)
-                bar = "█" * filled + "░" * (bar_len - filled)
+        async def process_batch(idx_paths):
+            async with sem:
+                paths = [p for _, p in idx_paths]
+                results = None
                 try:
-                    await bot.edit_message_text(
-                        chat_id=chat_id,
-                        message_id=status_msg_id,
-                        text=(
-                            f"🔄 Tekshirilmoqda...\n"
-                            f"{i + 1} / {total} sahifa\n"
-                            f"{bar}"
-                        ),
+                    results = await gemini.extract_student_answers_batch(paths)
+                except Exception as e:
+                    logger.error(f"Batch extraction failed, falling back per-page: {e}")
+                if not isinstance(results, list) or len(results) != len(idx_paths):
+                    results = []
+                    for p in paths:
+                        try:
+                            results.append(await gemini.extract_student_answers(p))
+                        except Exception as e:
+                            logger.error(f"Page extraction failed: {e}")
+                            results.append(empty_result())
+                for j, (idx, _) in enumerate(idx_paths):
+                    page_results[idx] = (
+                        results[j] if j < len(results) else empty_result()
                     )
-                except Exception:
-                    pass
+                async with lock:
+                    done[0] += len(idx_paths)
+                    job.processed_pages = done[0]
+                    await session.flush()
+                    if done[0] == total or done[0] % (STUDENT_BATCH_SIZE * 4) == 0:
+                        try:
+                            await bot.edit_message_text(
+                                chat_id=chat_id,
+                                message_id=status_msg_id,
+                                text=(
+                                    f"🔄 Tekshirilmoqda...\n"
+                                    f"{done[0]} / {total} sahifa\n"
+                                    f"{progress_bar(done[0])}"
+                                ),
+                            )
+                        except Exception:
+                            pass
+
+        batches = []
+        for i in range(0, total, STUDENT_BATCH_SIZE):
+            batches.append(list(enumerate(image_paths[i : i + STUDENT_BATCH_SIZE])))
+
+        await asyncio.gather(*(process_batch(b) for b in batches))
 
         # Group pages into students.
         # Simple strategy: each page is one student unless name matches previous.
