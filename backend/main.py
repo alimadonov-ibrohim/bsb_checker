@@ -37,12 +37,12 @@ def get_bot_and_dp():
         return _bot, _dp
 
     from aiogram import Bot, Dispatcher
-    from aiogram.fsm.storage.memory import MemoryStorage
     from aiogram.client.default import DefaultBotProperties
     from aiogram.enums import ParseMode
     from bot.handlers import get_all_routers
     from bot.middlewares.db import DbSessionMiddleware
     from bot.middlewares.auth import AuthMiddleware
+    from bot.storage.db_storage import DBStorage
 
     token = os.getenv("BOT_TOKEN")
     if not token:
@@ -52,7 +52,7 @@ def get_bot_and_dp():
         token=token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
-    _dp = Dispatcher(storage=MemoryStorage())
+    _dp = Dispatcher(storage=DBStorage())
     _dp.message.middleware(DbSessionMiddleware())
     _dp.callback_query.middleware(DbSessionMiddleware())
     _dp.message.middleware(AuthMiddleware())

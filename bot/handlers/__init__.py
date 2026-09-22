@@ -8,6 +8,7 @@ from .premium import router as premium_router
 from .profile import router as profile_router
 from .help import router as help_router
 from .admin import router as admin_router
+from .fallback import router as fallback_router
 
 
 def get_all_routers() -> list[Router]:
@@ -21,4 +22,5 @@ def get_all_routers() -> list[Router]:
         profile_router,
         help_router,
         admin_router,
+        fallback_router,
     ]

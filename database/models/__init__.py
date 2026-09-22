@@ -5,6 +5,7 @@ from .payment import Payment
 from .processing import ProcessingJob
 from .admin import Admin
 from .setting import Setting
+from .bot_state import BotState
 
 __all__ = [
     "User",
@@ -17,4 +18,5 @@ __all__ = [
     "ProcessingJob",
     "Admin",
     "Setting",
+    "BotState",
 ]
