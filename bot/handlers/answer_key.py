@@ -26,6 +26,7 @@ class AnswerKeyFSM(StatesGroup):
 
 @router.message(F.text == "📋 Javoblar kaliti")
 async def start_answer_key(message: Message, state: FSMContext, session: AsyncSession, user: User):
+    await state.clear()
     # Get user's recent tests without answer key
     result = await session.execute(
         select(Test)
@@ -68,6 +69,10 @@ async def start_answer_key(message: Message, state: FSMContext, session: AsyncSe
 @router.message(AnswerKeyFSM.select_test)
 async def select_test_for_key(message: Message, state: FSMContext, session: AsyncSession, user: User):
     text = (message.text or "").strip()
+    if text == "❌ Bekor qilish":
+        await state.clear()
+        await message.answer("Bekor qilindi.", reply_markup=main_menu_kb())
+        return
     if not text.isdigit():
         await message.answer("⚠️ Test ID raqamini kiriting.")
         return

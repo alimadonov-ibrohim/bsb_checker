@@ -19,6 +19,7 @@ class ResultsFSM(StatesGroup):
 
 @router.message(F.text == "📊 Natijalar")
 async def show_results_start(message: Message, state: FSMContext, session: AsyncSession, user: User):
+    await state.clear()
     result = await session.execute(
         select(Test)
         .where(Test.user_id == user.id)

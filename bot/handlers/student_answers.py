@@ -43,6 +43,7 @@ async def get_setting(session: AsyncSession, key: str, default: str) -> str:
 
 @router.message(F.text == "📄 O‘quvchilar javoblari")
 async def start_student_answers(message: Message, state: FSMContext, session: AsyncSession, user: User):
+    await state.clear()
     result = await session.execute(
         select(Test)
         .where(Test.user_id == user.id)
@@ -92,6 +93,10 @@ async def start_student_answers(message: Message, state: FSMContext, session: As
 @router.message(StudentAnswersFSM.select_test)
 async def select_test_for_students(message: Message, state: FSMContext, session: AsyncSession, user: User):
     text = (message.text or "").strip()
+    if text == "❌ Bekor qilish":
+        await state.clear()
+        await message.answer("Bekor qilindi.", reply_markup=main_menu_kb())
+        return
     if not text.isdigit():
         await message.answer("⚠️ Test ID kiriting.")
         return
@@ -272,6 +277,7 @@ async def process_student_file(
             job.total_pages = 1
             await session.flush()
 
+        total = len(image_paths)
         page_results = [None] * total
         sem = asyncio.Semaphore(STUDENT_CONCURRENCY)
         lock = asyncio.Lock()

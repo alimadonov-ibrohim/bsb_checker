@@ -18,6 +18,9 @@ from database.models import BotState
 logger = logging.getLogger(__name__)
 
 
+_MISSING = object()
+
+
 def _dumps(data: Mapping[str, Any]) -> str:
     return json.dumps(data, ensure_ascii=False, default=str)
 
@@ -34,7 +37,7 @@ class DBStorage(BaseStorage):
     async def _write(
         self,
         key: StorageKey,
-        state: str | None = None,
+        state: str | None | object = _MISSING,
         data: Mapping[str, Any] | None = None,
     ) -> None:
         chat_id = key.chat_id
@@ -44,8 +47,8 @@ class DBStorage(BaseStorage):
             if row is None:
                 row = BotState(chat_id=chat_id, user_id=user_id)
                 session.add(row)
-            if state is not None:
-                row.state = state
+            if state is not _MISSING:
+                row.state = state if state is None else str(state)
             if data is not None:
                 row.data_json = _dumps(data)
             row.updated_at = datetime.now(timezone.utc)
@@ -54,7 +57,7 @@ class DBStorage(BaseStorage):
     async def set_state(self, key: StorageKey, state: State | str | None = None) -> None:
         if isinstance(state, State):
             state = state.state
-        await self._write(key, state=state if state is not None else None)
+        await self._write(key, state=state)
 
     async def get_state(self, key: StorageKey) -> str | None:
         row = await self._row(key)
