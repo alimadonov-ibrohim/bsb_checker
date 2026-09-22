@@ -160,8 +160,15 @@ async def receive_answer_key(
 
         if not answers or not any(v for v in answers.values()):
             await message.answer(
-                "⚠️ Javoblar kalitidan hech narsa o‘qib bo‘lmadi.\n"
-                "Formatni tekshiring: 1-A, 2-C, 3-B ...",
+                "⚠️ Javoblar kalitidan hech narsa o‘qib bo‘lmadi.\n\n"
+                "Iltimos quyidagilarni tekshiring:\n"
+                "• Rasm aniq bo‘lsin — yaqinroq va yaxshiroq yorug‘likda suratga oling\n"
+                "• Harflar aniq ko‘rinadigan bo‘lsin (nafis/qiyshiq yozuv bo‘lmasin)\n"
+                "• Rasmni «Fayl» sifatida (tasvirni bosib ushlab → «Fayl sifatida yuborish») yuborsangiz "
+                "sifat yo‘qolmaydi\n"
+                "• Format: <code>1-A 2-C 3-B</code> yoki har bir satrda bitta javob\n\n"
+                "Qayta urinib ko‘ring.",
+                parse_mode="HTML",
                 reply_markup=main_menu_kb(),
             )
             await state.clear()

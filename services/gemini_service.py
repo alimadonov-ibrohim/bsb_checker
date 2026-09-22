@@ -41,6 +41,11 @@ The answer key may be written in ANY format, for example:
 - a vertical list, one answer per line
 - a continuous sequence of letters, e.g. "ABCDABCD" (first letter = question 1, second = question 2, ...)
 - letters circled/underlined in a row
+- a photographed or scanned sheet of paper (printed or handwritten)
+- a filled bubble/answer sheet ("javoblar varag'i") with one option shaded/circled per question
+
+If the file contains a continuous sequence of letters without numbers (e.g. "ABCDABCD"),
+number them from 1 in order (A=question 1, B=question 2, ...).
 
 RULES (STRICT):
 1. Extract ONLY the answers that are explicitly written or marked in the file.
@@ -64,14 +69,16 @@ Return pure JSON, nothing else.
 
 # Fallback used only if the first attempt returns nothing.
 EXTRACT_ANSWER_KEY_FALLBACK_PROMPT = """
-Read the provided file and list every answer letter that is written on it, in order.
+Read the provided file (image, scan, photo, or PDF) and list every answer letter that is written or marked on it, in order.
+This may be a photographed sheet, handwritten notes, or a filled bubble sheet ("javoblar varag'i").
 Do NOT solve the questions. Do NOT guess. Only transcribe what is visible.
 
 Return JSON where keys are question numbers and values are the letters found:
 {"1": "A", "2": "C", "3": "B"}
 
+If the sheet is a table with question numbers and columns A/B/C/D, read the checked/circled/shaded cell for each row.
 If numbers are not shown, use positions 1, 2, 3, ... in reading order.
-If something is unreadable use null.
+If a mark is unreadable or missing use null.
 Return pure JSON only.
 """
 
@@ -134,11 +141,42 @@ class GeminiService:
         self.retry_delay = 2.0
 
     async def _upload_file(self, file_path: str):
-        """Upload file to Gemini Files API."""
+        """Upload file to Gemini Files API (images are preprocessed for OCR)."""
         path = Path(file_path)
         if not path.exists():
             raise FileNotFoundError(f"File not found: {file_path}")
-        return await self.client.aio.files.upload(file=str(path))
+        upload_path = self._prepare_image(path)
+        try:
+            return await self.client.aio.files.upload(file=str(upload_path))
+        finally:
+            if upload_path != path:
+                try:
+                    upload_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+    def _prepare_image(self, path: Path) -> Path:
+        """Enhance photos/scans before OCR: autoconstrast + upscale small images."""
+        if path.suffix.lower() not in {".jpg", ".jpeg", ".png"}:
+            return path
+        try:
+            from PIL import Image, ImageOps
+
+            tmp = path.with_name(path.stem + ".prep.png")
+            with Image.open(path) as im:
+                im = im.convert("RGB")
+                im = ImageOps.autocontrast(im)
+                w, h = im.size
+                if max(w, h) < 1024:
+                    scale = 1.5
+                    im = im.resize(
+                        (int(w * scale), int(h * scale)), Image.LANCZOS
+                    )
+                im.save(tmp, "PNG")
+            return tmp
+        except Exception as e:
+            logger.warning(f"Image prepare failed, using original: {e}")
+            return path
 
     async def _generate_with_retry(self, contents, prompt: str) -> str:
         """Generate content, retrying and rotating through models on failure."""
@@ -196,9 +234,14 @@ class GeminiService:
 
     def _normalize_answer_map(self, data) -> dict:
         """Turn any parsed structure into {question_number: letter|null}."""
-        if isinstance(data, dict) and isinstance(data.get("answers"), dict):
+        if isinstance(data, dict) and isinstance(data.get("answers"), (dict, list)):
             data = data["answers"]
         result = {}
+        if isinstance(data, list):
+            return {
+                str(i + 1): self._clean_letter(v)
+                for i, v in enumerate(data)
+            }
         if not isinstance(data, dict):
             return result
         for k, v in data.items():
@@ -222,6 +265,10 @@ class GeminiService:
         return result
 
     @staticmethod
+    def _has_useful_answer(result: dict) -> bool:
+        return any(v not in (None, "") for v in result.values())
+
+    @staticmethod
     def _clean_letter(value) -> str | None:
         if value is None:
             return None
@@ -234,11 +281,11 @@ class GeminiService:
     async def _extract_with_prompts(self, contents, primary: str, fallback: str) -> dict:
         raw = await self._generate_with_retry(contents, primary)
         result = self._normalize_answer_map(self._parse_json(raw))
-        if not result:
-            logger.warning(f"Answer key empty on first pass, retrying. raw={raw[:300]!r}")
+        if not self._has_useful_answer(result):
+            logger.warning(f"Answer key no useful answers on first pass, retrying. raw={raw[:300]!r}")
             raw = await self._generate_with_retry(contents, fallback)
             result = self._normalize_answer_map(self._parse_json(raw))
-            if not result:
+            if not self._has_useful_answer(result):
                 logger.error(f"Answer key still empty. raw={raw[:300]!r}")
         return result
 
