@@ -20,6 +20,7 @@ class Test(Base):
     test_name: Mapped[str] = mapped_column(String(255), nullable=False)
     test_type: Mapped[str] = mapped_column(String(10), nullable=False)  # BSB / CHSB
     question_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    points_json: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON: {"1": 2, "2": 1, ...} har bir savol bali
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

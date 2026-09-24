@@ -17,7 +17,8 @@ from database.models.setting import Setting
 from bot.keyboards.main_kb import main_menu_kb, cancel_kb
 from services.gemini_service import GeminiService
 from services.pdf_service import PDFService
-from services.checker_service import CheckerService
+from services.checker_service import CheckerService, normalize_points
+from services.excel_answers import parse_student_excel
 from services.paths import temp_dir
 
 router = Router(name="student_answers")
@@ -28,6 +29,9 @@ TEMP = temp_dir()
 MAX_FILE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "50"))
 STUDENT_BATCH_SIZE = int(os.getenv("STUDENT_BATCH_SIZE", "4"))
 STUDENT_CONCURRENCY = int(os.getenv("STUDENT_CONCURRENCY", "2"))
+
+ACCEPTED_STUDENT_EXTS = {".pdf", ".jpg", ".jpeg", ".png", ".xlsx", ".xls", ".csv"}
+EXCEL_EXTS = {".xlsx", ".xls", ".csv"}
 
 
 class StudentAnswersFSM(StatesGroup):
@@ -75,8 +79,8 @@ async def start_student_answers(message: Message, state: FSMContext, session: As
         await state.set_state(StudentAnswersFSM.waiting_file)
         await message.answer(
             f"📄 <b>{tests_with_key[0].test_name}</b> uchun o‘quvchilar javoblarini yuboring.\n\n"
-            f"Qabul qilinadi: PDF yoki rasmlar (JPG/PNG)\n"
-            f"Bir nechta sahifa bo‘lishi mumkin.",
+            f"Qabul qilinadi: PDF, rasm (JPG/PNG) yoki Excel (.xlsx/.csv)\n"
+            f"PDF/katta fayllar bir nechta sahifa bo‘lishi mumkin.",
             parse_mode="HTML",
             reply_markup=cancel_kb(),
         )
@@ -115,7 +119,7 @@ async def select_test_for_students(message: Message, state: FSMContext, session:
     await state.update_data(test_id=test.id)
     await state.set_state(StudentAnswersFSM.waiting_file)
     await message.answer(
-        f"📄 <b>{test.test_name}</b> uchun PDF yoki rasmlarni yuboring.",
+        f"📄 <b>{test.test_name}</b> uchun PDF, rasm (JPG/PNG) yoki Excel (.xlsx/.csv) yuboring.",
         parse_mode="HTML",
     )
 
@@ -177,8 +181,10 @@ async def receive_student_files(
         if message.document:
             doc = message.document
             ext = Path(doc.file_name or "").suffix.lower()
-            if ext not in {".pdf", ".jpg", ".jpeg", ".png"}:
-                await message.answer("⚠️ Faqat PDF yoki rasm (JPG/PNG) qabul qilinadi.")
+            if ext not in ACCEPTED_STUDENT_EXTS:
+                await message.answer(
+                    "⚠️ Faqat PDF, rasm (JPG/PNG) yoki Excel (.xlsx/.csv) qabul qilinadi."
+                )
                 return
             if doc.file_size and doc.file_size > MAX_FILE_MB * 1024 * 1024:
                 await message.answer(f"⚠️ Fayl hajmi {MAX_FILE_MB} MB dan oshmasligi kerak.")
@@ -258,6 +264,22 @@ async def process_student_file(
     try:
         job.status = "processing"
         await session.flush()
+
+        ext = Path(file_path).suffix.lower()
+        if ext in EXCEL_EXTS:
+            await process_student_excel(
+                bot=bot,
+                chat_id=chat_id,
+                status_msg_id=status_msg_id,
+                session=session,
+                user=user,
+                test=test,
+                answer_key=answer_key,
+                file_path=file_path,
+                job=job,
+                checker=checker,
+            )
+            return
 
         if is_pdf:
             if not pdf_service.is_valid_pdf(file_path):
@@ -384,6 +406,7 @@ async def process_student_file(
             warn_multi = False
 
         saved_count = 0
+        points = normalize_points(test.points_json)
         for idx, sraw in enumerate(students_raw, 1):
             merged = checker.merge_student_pages(sraw["pages"])
             name = merged["name"] or f"O‘quvchi #{idx}"
@@ -407,6 +430,7 @@ async def process_student_file(
                 answer_key=answer_key,
                 student_answers=merged["answers"],
                 question_count=test.question_count,
+                points=points,
             )
 
             result_obj = Result(
@@ -469,3 +493,115 @@ async def process_student_file(
         except Exception:
             pass
         pdf_service.cleanup_job(job.id)
+
+
+async def process_student_excel(
+    bot: Bot,
+    chat_id: int,
+    status_msg_id: int,
+    session: AsyncSession,
+    user: User,
+    test: Test,
+    answer_key: dict,
+    file_path: str,
+    job: ProcessingJob,
+    checker: CheckerService,
+):
+    """Read a student's answers from an Excel/CSV file and save the result."""
+    try:
+        await bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=status_msg_id,
+            text="🔄 Excel fayl o‘qilmoqda...",
+        )
+
+        parsed = parse_student_excel(file_path)
+        answers = parsed.get("answers", {})
+        name = parsed.get("name") or f"O‘quvchi #{1}"
+        class_name = parsed.get("class_name") or test.class_name
+
+        job.total_pages = 1
+        job.processed_pages = 1
+        job.status = "completed"
+        job.finished_at = datetime.now(timezone.utc)
+        await session.flush()
+
+        student = Student(
+            test_id=test.id,
+            name=name,
+            class_name=class_name,
+        )
+        session.add(student)
+        await session.flush()
+
+        sa = StudentAnswer(
+            student_id=student.id,
+            answers_json=json.dumps(answers, ensure_ascii=False),
+        )
+        session.add(sa)
+
+        comparison = checker.compare(
+            answer_key=answer_key,
+            student_answers=answers,
+            question_count=test.question_count,
+            points=normalize_points(test.points_json),
+        )
+
+        result_obj = Result(
+            student_id=student.id,
+            correct_count=comparison["correct_count"],
+            incorrect_count=comparison["incorrect_count"],
+            uncertain_count=comparison["uncertain_count"],
+            percentage=comparison["percentage"],
+            score=comparison["score"],
+            details_json=json.dumps(comparison["details"], ensure_ascii=False),
+        )
+        session.add(result_obj)
+
+        if not answers:
+            summary = (
+                f"⚠️ <b>Excelda javob topilmadi</b>\n\n"
+                f"📄 Fayl: {job.file_name}\n"
+                f"O‘quvchi javoblari qator/shtrix ko‘rinishida bo‘lishi mumkin.\n"
+                f"Iltimos javoblarni tekshirib, botga qayta yuboring."
+            )
+            await bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=status_msg_id,
+                text=summary,
+                parse_mode="HTML",
+            )
+        else:
+            answered = sum(1 for v in answers.values() if v)
+            summary = (
+                f"✅ <b>Tekshirish yakunlandi!</b>\n\n"
+                f"📄 Fayl: {job.file_name}\n"
+                f"📑 Format: Excel\n"
+                f"👨‍🎓 O‘quvchi: {name}\n"
+                f"📚 Test: {test.test_name}\n"
+                f"📝 Javoblar topildi: {answered}/{test.question_count}\n\n"
+                f"Natijalarni ko‘rish: <b>📊 Natijalar</b>\n"
+                f"Excel: <b>📥 Excel</b>"
+            )
+            await bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=status_msg_id,
+                text=summary,
+                parse_mode="HTML",
+            )
+
+        await bot.send_message(chat_id, "Asosiy menyu:", reply_markup=main_menu_kb())
+
+    except Exception as e:
+        job.status = "failed"
+        job.error = str(e)[:1000]
+        job.finished_at = datetime.now(timezone.utc)
+        await session.flush()
+        try:
+            await bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=status_msg_id,
+                text=f"❌ Excel tekshirishda xatolik:\n{str(e)[:300]}",
+            )
+        except Exception:
+            pass

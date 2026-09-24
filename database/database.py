@@ -1,5 +1,6 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy import text
 from dotenv import load_dotenv
 import os
 
@@ -64,3 +65,11 @@ async def init_db():
     from . import models  # noqa: F401
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    # Idempotent migrations for already-existing tables
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(
+                text("ALTER TABLE tests ADD COLUMN IF NOT EXISTS points_json TEXT")
+            )
+    except Exception:
+        pass

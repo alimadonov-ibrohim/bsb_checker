@@ -2,6 +2,7 @@ from aiogram import Router
 from .start import router as start_router
 from .test_create import router as test_create_router
 from .answer_key import router as answer_key_router
+from .points import router as points_router
 from .student_answers import router as student_answers_router
 from .results import router as results_router
 from .premium import router as premium_router
@@ -16,6 +17,7 @@ def get_all_routers() -> list[Router]:
         start_router,
         test_create_router,
         answer_key_router,
+        points_router,
         student_answers_router,
         results_router,
         premium_router,

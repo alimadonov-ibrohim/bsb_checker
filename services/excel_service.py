@@ -44,7 +44,7 @@ class ExcelService:
 
         headers1 = [
             "№", "O‘quvchi", "Sinf", "Jami savol",
-            "To‘g‘ri", "Noto‘g‘ri", "Noaniq", "Foiz", "Ball"
+            "To‘g‘ri", "Noto‘g‘ri", "Noaniq", "Foiz", "Ball", "Maks ball"
         ]
         header_font = Font(bold=True, color="FFFFFF")
         header_fill = PatternFill("solid", fgColor="2E7D32")
@@ -73,6 +73,7 @@ class ExcelService:
                 s.get("uncertain_count", 0),
                 s.get("percentage", 0),
                 s.get("score", 0),
+                s.get("max_score", test_info.get("question_count", 0)),
             ]
             for col, val in enumerate(row, 1):
                 cell = ws1.cell(idx + 1, col, val)
@@ -92,7 +93,7 @@ class ExcelService:
             all_q.update(s.get("details", {}).keys())
         sorted_q = sorted(all_q, key=lambda x: int(x) if str(x).isdigit() else 0)
 
-        headers2 = ["O‘quvchi"] + [f"{q}-savol" for q in sorted_q] + ["To‘g‘ri", "Noto‘g‘ri", "Foiz"]
+        headers2 = ["O‘quvchi"] + [f"{q}-savol" for q in sorted_q] + ["To‘g‘ri", "Noto‘g‘ri", "Foiz", "Ball", "Maks ball"]
         for col, h in enumerate(headers2, 1):
             cell = ws2.cell(1, col, h)
             cell.font = header_font
@@ -104,7 +105,23 @@ class ExcelService:
         red_fill = PatternFill("solid", fgColor="FFCDD2")
         yellow_fill = PatternFill("solid", fgColor="FFF9C4")
 
-        for row_idx, s in enumerate(students_data, 2):
+        # Row 2: correct answer key (javob kaliti) — first non-empty detail per question.
+        key_row = 2
+        ws2.cell(key_row, 1, "Javob kaliti").font = Font(bold=True)
+        ws2.cell(key_row, 1).border = thin
+        first_details = {}
+        for s in students_data:
+            for q, d in s.get("details", {}).items():
+                if q not in first_details and d.get("correct"):
+                    first_details[q] = d
+        for col_idx, q in enumerate(sorted_q, 2):
+            d = first_details.get(str(q), {})
+            cell = ws2.cell(key_row, col_idx, d.get("correct") or "—")
+            cell.border = thin
+            cell.alignment = Alignment(horizontal="center")
+            cell.font = Font(bold=True)
+
+        for row_idx, s in enumerate(students_data, 3):
             ws2.cell(row_idx, 1, s.get("name", "")).border = thin
             details = s.get("details", {})
             for col_idx, q in enumerate(sorted_q, 2):
@@ -126,6 +143,8 @@ class ExcelService:
                 s.get("correct_count", 0),
                 s.get("incorrect_count", 0),
                 s.get("percentage", 0),
+                s.get("score", 0),
+                s.get("max_score", test_info.get("question_count", 0)),
             ]
             base = 2 + len(sorted_q)
             for i, val in enumerate(last_cols):

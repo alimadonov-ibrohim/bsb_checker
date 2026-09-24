@@ -14,15 +14,20 @@ HELP_TEXT = """
 📋 Javoblar kaliti → TXT, PDF yoki rasm yuboring
 Format: 1-A, 2-C, 3-B ...
 
-<b>3. O‘quvchilar javoblari</b>
-📄 O‘quvchilar javoblari → PDF yoki rasmlar yuboring
-Bot Gemini orqali faqat belgilangan javoblarni o‘qiydi.
+<b>3. Ballar</b>
+⭐ Ballar → har bir savolga necha ball berilishini kiritish/ozgartirish.
+Format: faqat son (2), ro‘yxat (2,2,1,1) yoki diapazon (1-10:2, 11:1).
 
-<b>4. Natijalar</b>
+<b>4. O‘quvchilar javoblari</b>
+📄 O‘quvchilar javoblari → PDF, rasm (JPG/PNG) yoki Excel (.xlsx/.csv) yuboring
+Bot faqat belgilangan javoblarni o‘qiydi va kalit bilan solishtiradi.
+
+<b>5. Natijalar</b>
 📊 Natijalar → barcha o‘quvchilar natijasi
+🔍 Javoblar → har bir savol uchun to‘g‘ri/noto‘g‘ri va to‘g‘ri javob
 📥 Excel → yuklab olish
 
-<b>5. Premium</b>
+<b>6. Premium</b>
 👑 Premium → kunlik PDF limitini oshirish
 
 ⚠️ <b>Muhim:</b>
